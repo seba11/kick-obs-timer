@@ -47,3 +47,19 @@ Zalecany rozmiar widzętu w OBS:
 Width: 800
 Height: 300
 ```
+
+## Wersja on-line
+
+Skorzystaj z hostowanej wersji na github, w OBS ustaw ten adres jako Browser Source.
+
+```text
+https://seba11.github.io/kick-obs-timer/?channel=twojkanal
+```
+w miejsce `twojkanal` wpisz nazwę swojego kanału.
+
+
+Zalecany rozmiar:
+
+```text
+Width: 800
+Height: 300
