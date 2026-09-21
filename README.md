@@ -6,24 +6,17 @@ Timer reaguje tylko na wiadomości strimera i moderatorów.
 
 ## Komendy
 
+Uruchamia timer na 5 minut.
 ```text
 !timer 5
 ```
 
-Uruchamia timer na 5 minut.
-
-```text
-!timer 10
-```
-
-Resetuje aktualny timer i rozpoczyna odliczanie od 10 minut.
+Zatrzymuje odliczanie i ukrywa timer.
 
 ```text
 !timer stop
 !timer reset
 ```
-
-Zatrzymuje odliczanie i ukrywa timer.
 
 ## Użycie lokalne
 
