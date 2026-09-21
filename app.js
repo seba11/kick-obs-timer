@@ -10,6 +10,10 @@
 	CONFIG.channel = channelFromUrl;
 	}
 
+  const timerEndSound = CONFIG.sound ? new Audio(CONFIG.sound) : null;
+  if (timerEndSound) {
+    timerEndSound.preload = "auto";
+  }
   const PusherAppKey = "32cbd69e4b950bf97679";
   const PusherCluster = "us2";
 
@@ -79,6 +83,15 @@
 
     if (remainingMs <= 0) {
       timerTextEl.textContent = "00:00";
+
+      if (timerEndSound) {
+        timerEndSound.currentTime = 0;
+
+        timerEndSound.play().catch(err => {
+          warn("Unable to play timer sound:", err);
+        });
+      }
+
       hideTimer();
       log("Timer finished");
       return;

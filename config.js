@@ -10,6 +10,9 @@ window.KICK_TIMER_CONFIG = {
   minMinutes: 1,
   maxMinutes: 240,
 
+  // Dźwięk do odtworzenia na koniec timera.
+  sound: "sound/alarm-classic.mp3"
+
   // true = dodatkowe logi w konsoli OBS Browser Source.
   debug: true
 };
