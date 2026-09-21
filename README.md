@@ -41,6 +41,13 @@ Width: 800
 Height: 300
 ```
 
+Pozostałe ustawienia:
+`channel` – nazwa kanału Kick, np. "Eddie".
+`command` – komenda uruchamiająca timer. Domyślnie !timer.
+`minMinutes` – minimalna liczba minut, jaką można ustawić komendą.
+`maxMinutes` – maksymalna liczba minut, jaką można ustawić komendą.
+`debug` – true włącza dodatkowe logi w konsoli Browser Source, false je wyłącza.
+
 ## Wersja on-line
 
 Skorzystaj z hostowanej wersji na github, w OBS ustaw ten adres jako Browser Source.
