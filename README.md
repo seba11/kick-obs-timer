@@ -28,6 +28,7 @@ window.KICK_TIMER_CONFIG = {
   command: "!timer",
   minMinutes: 1,
   maxMinutes: 240,
+  sound: "sound/alarm-classic.mp3",
   debug: true
 };
 ```
@@ -47,6 +48,7 @@ channel – nazwa kanału Kick, np. "Eddie".
 command – komenda uruchamiająca timer. Domyślnie !timer.
 minMinutes – minimalna liczba minut, jaką można ustawić komendą.
 maxMinutes – maksymalna liczba minut, jaką można ustawić komendą.
+sound: śieżka do pliku z dźwiękiem.
 debug – true włącza dodatkowe logi w konsoli Browser Source, false je wyłącza.
 ```
 ## Wersja on-line
