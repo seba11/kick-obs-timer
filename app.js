@@ -18,6 +18,7 @@
   const PusherCluster = "us2";
 
   const timerEl = document.getElementById("timer");
+  const timerMessageEl = document.getElementById("timerMessage");
   const timerTextEl = document.getElementById("timerText");
 
   let socket = null;
@@ -70,6 +71,8 @@
     }
 
     timerEndsAt = null;
+    timerMessageEl.textContent = "";
+    timerMessageEl.classList.add("hidden");
     timerEl.classList.add("hidden");
   }
 
@@ -100,12 +103,20 @@
     timerTextEl.textContent = formatTime(remainingMs / 1000);
   }
 
-  function startTimer(minutes) {
+  function startTimer(minutes, message = "") {
     if (timerInterval) {
       clearInterval(timerInterval);
     }
 
     timerEndsAt = Date.now() + minutes * 60 * 1000;
+
+    if (message) {
+      timerMessageEl.textContent = message;
+      timerMessageEl.classList.remove("hidden");
+    } else {
+      timerMessageEl.textContent = "";
+      timerMessageEl.classList.add("hidden");
+    }
 
     timerEl.classList.remove("hidden");
     renderTimer();
@@ -135,7 +146,154 @@
     }
 
     const timeMatch = value.match(
-      new RegExp(`^${escaped}\\s+(\\d+)$`, "i")
+      new RegExp(`^${escaped}\\s+(\\d+)(?:\\s+(.+))?(() => {
+  "use strict";
+
+  const CONFIG = window.KICK_TIMER_CONFIG || {};
+  
+  const urlParams = new URLSearchParams(window.location.search);
+  const channelFromUrl = urlParams.get("channel");
+
+  if (channelFromUrl) {
+	CONFIG.channel = channelFromUrl;
+	}
+
+  const timerEndSound = CONFIG.sound ? new Audio(CONFIG.sound) : null;
+  if (timerEndSound) {
+    timerEndSound.preload = "auto";
+  }
+  const PusherAppKey = "32cbd69e4b950bf97679";
+  const PusherCluster = "us2";
+
+  const timerEl = document.getElementById("timer");
+  const timerMessageEl = document.getElementById("timerMessage");
+  const timerTextEl = document.getElementById("timerText");
+
+  let socket = null;
+  let reconnectTimer = null;
+  let reconnectAttempts = 0;
+  let currentChatroomId = null;
+  let broadcasterUsername = null;
+
+  let timerInterval = null;
+  let timerEndsAt = null;
+
+  const log = (...args) => {
+    if (CONFIG.debug) {
+      console.log("[KickTimer]", ...args);
+    }
+  };
+
+  const warn = (...args) => console.warn("[KickTimer]", ...args);
+  const error = (...args) => console.error("[KickTimer]", ...args);
+
+  function normalizeUsername(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function formatTime(totalSeconds) {
+    totalSeconds = Math.max(0, Math.ceil(totalSeconds));
+
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return [
+        String(hours).padStart(2, "0"),
+        String(minutes).padStart(2, "0"),
+        String(seconds).padStart(2, "0")
+      ].join(":");
+    }
+
+    return [
+      String(minutes).padStart(2, "0"),
+      String(seconds).padStart(2, "0")
+    ].join(":");
+  }
+
+  function hideTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+
+    timerEndsAt = null;
+    timerMessageEl.textContent = "";
+    timerMessageEl.classList.add("hidden");
+    timerEl.classList.add("hidden");
+  }
+
+  function renderTimer() {
+    if (!timerEndsAt) {
+      hideTimer();
+      return;
+    }
+
+    const remainingMs = timerEndsAt - Date.now();
+
+    if (remainingMs <= 0) {
+      timerTextEl.textContent = "00:00";
+
+      if (timerEndSound) {
+        timerEndSound.currentTime = 0;
+
+        timerEndSound.play().catch(err => {
+          warn("Unable to play timer sound:", err);
+        });
+      }
+
+      hideTimer();
+      log("Timer finished");
+      return;
+    }
+
+    timerTextEl.textContent = formatTime(remainingMs / 1000);
+  }
+
+  function startTimer(minutes, message = "") {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+    }
+
+    timerEndsAt = Date.now() + minutes * 60 * 1000;
+
+    if (message) {
+      timerMessageEl.textContent = message;
+      timerMessageEl.classList.remove("hidden");
+    } else {
+      timerMessageEl.textContent = "";
+      timerMessageEl.classList.add("hidden");
+    }
+
+    timerEl.classList.remove("hidden");
+    renderTimer();
+
+    timerInterval = setInterval(renderTimer, 250);
+
+    log(`Timer started/reset: ${minutes} minute(s)`);
+  }
+
+  function parseTimerCommand(text) {
+    const command = String(CONFIG.command || "!timer").trim();
+    const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const value = String(text || "").trim();
+
+    // Akceptowane:
+    // !timer 5
+    // !timer stop
+    // !timer reset
+    const actionMatch = value.match(
+      new RegExp(`^${escaped}\\s+(stop|reset)$`, "i")
+    );
+
+    if (actionMatch) {
+      return {
+        type: actionMatch[1].toLowerCase()
+      };
+    }
+
+, "i")
     );
 
     if (!timeMatch) {
@@ -158,7 +316,8 @@
 
     return {
       type: "start",
-      minutes
+      minutes,
+      message: timeMatch[2] ? timeMatch[2].trim().slice(0, 100) : ""
     };
   }
 
@@ -308,7 +467,7 @@
     log(`Accepted command from ${username}: ${text}`);
 
     if (command.type === "start") {
-      startTimer(command.minutes);
+      startTimer(command.minutes, command.message);
       return;
     }
 
