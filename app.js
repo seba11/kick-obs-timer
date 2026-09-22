@@ -18,6 +18,7 @@
   const PusherCluster = "us2";
 
   const timerEl = document.getElementById("timer");
+  const timerMessageEl = document.getElementById("timerMessage");
   const timerTextEl = document.getElementById("timerText");
 
   let socket = null;
@@ -70,6 +71,8 @@
     }
 
     timerEndsAt = null;
+    timerMessageEl.textContent = "";
+    timerMessageEl.classList.add("hidden");
     timerEl.classList.add("hidden");
   }
 
@@ -100,12 +103,20 @@
     timerTextEl.textContent = formatTime(remainingMs / 1000);
   }
 
-  function startTimer(minutes) {
+  function startTimer(minutes, message = "") {
     if (timerInterval) {
       clearInterval(timerInterval);
     }
 
     timerEndsAt = Date.now() + minutes * 60 * 1000;
+
+    if (message) {
+      timerMessageEl.textContent = message;
+      timerMessageEl.classList.remove("hidden");
+    } else {
+      timerMessageEl.textContent = "";
+      timerMessageEl.classList.add("hidden");
+    }
 
     timerEl.classList.remove("hidden");
     renderTimer();
@@ -135,7 +146,7 @@
     }
 
     const timeMatch = value.match(
-      new RegExp(`^${escaped}\\s+(\\d+)$`, "i")
+      new RegExp(`^${escaped}\\s+(\\d+)(?:\\s+(.+))?$`, "i")
     );
 
     if (!timeMatch) {
@@ -158,7 +169,8 @@
 
     return {
       type: "start",
-      minutes
+      minutes,
+      message: timeMatch[2] ? timeMatch[2].trim().slice(0, 100) : ""
     };
   }
 
@@ -308,7 +320,7 @@
     log(`Accepted command from ${username}: ${text}`);
 
     if (command.type === "start") {
-      startTimer(command.minutes);
+      startTimer(command.minutes, command.message);
       return;
     }
 

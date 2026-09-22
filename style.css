@@ -16,6 +16,7 @@ body {
   height: 100%;
 
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
 
@@ -34,6 +35,21 @@ body {
   transition:
     opacity 180ms ease,
     transform 180ms ease;
+}
+
+.timer__message {
+  max-width: 95%;
+  margin-bottom: 0.25em;
+
+  font-size: 0.28em;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.timer__message.hidden {
+  display: none;
 }
 
 .timer.hidden {

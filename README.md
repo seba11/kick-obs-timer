@@ -11,6 +11,11 @@ Uruchamia timer na 5 minut.
 !timer 5
 ```
 
+Opcjonalnie po czasie można dodać tekst wyświetlany nad timerem (maks. 100 znaków).
+```text
+!timer 5 random message
+```
+
 Zatrzymuje odliczanie i ukrywa timer.
 
 ```text
