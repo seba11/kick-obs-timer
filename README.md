@@ -71,3 +71,20 @@ Zalecany rozmiar:
 ```text
 Width: 800
 Height: 300
+
+
+## Realtime proxy
+
+Kick wymaga obecnie połączenia WebSocket z własnego originu, dlatego przy użyciu
+GitHub Pages lub innego hostingu potrzebny jest mały Cloudflare Worker.
+
+Kod Workera znajduje się w katalogu `worker/`.
+
+Po wdrożeniu ustaw jego adres w `config.js`:
+
+```js
+realtimeProxy: "https://kick-obs-timer-proxy.example.workers.dev",
+```
+
+Worker pośredniczy wyłącznie w anonimowej negocjacji realtime Kicka i połączeniu
+WebSocket.
