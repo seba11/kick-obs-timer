@@ -15,6 +15,7 @@
     timerEndSound.preload = "auto";
   }
   const RealtimeApiBase = "https://web.kick.com/api/v1/realtime";
+  const RealtimeProxy = String(CONFIG.realtimeProxy || "").replace(/\/+$/, "");
   const realtimeClientId =
     globalThis.crypto?.randomUUID?.() ||
     `kick-timer-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -355,8 +356,28 @@
     }
   }
 
+  function realtimeHttpUrl(path) {
+    if (!RealtimeProxy) {
+      return `${RealtimeApiBase}${path}`;
+    }
+
+    return `${RealtimeProxy}/realtime?path=${encodeURIComponent(path)}`;
+  }
+
+  function realtimeWebSocketUrl(targetUrl) {
+    if (!RealtimeProxy) {
+      return targetUrl;
+    }
+
+    const proxyUrl = new URL(`${RealtimeProxy}/ws`);
+    proxyUrl.protocol = proxyUrl.protocol === "https:" ? "wss:" : "ws:";
+    proxyUrl.searchParams.set("url", targetUrl);
+
+    return proxyUrl.toString();
+  }
+
   async function postRealtime(path, body) {
-    const response = await fetch(`${RealtimeApiBase}${path}`, {
+    const response = await fetch(realtimeHttpUrl(path), {
       method: "POST",
       cache: "no-store",
       credentials: "omit",
@@ -681,7 +702,16 @@
 
       log("Kick realtime provider:", realtimeProvider);
 
-      socket = new WebSocket(realtimeConnection.url);
+      const socketUrl = realtimeWebSocketUrl(realtimeConnection.url);
+
+      if (!RealtimeProxy && location.hostname !== "kick.com") {
+        warn(
+          "Kick realtime may reject this WebSocket origin. " +
+          "Configure realtimeProxy for GitHub Pages/OBS hosting."
+        );
+      }
+
+      socket = new WebSocket(socketUrl);
 
       socket.addEventListener("open", () => {
         connecting = false;
