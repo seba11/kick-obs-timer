@@ -104,10 +104,7 @@ async function proxyWebSocket(request, url) {
     });
   }
 
-  return new Response(null, {
-    status: 101,
-    webSocket: upstream.webSocket
-  });
+  return upstream;
 }
 
 export default {
