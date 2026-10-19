@@ -14,8 +14,10 @@
   if (timerEndSound) {
     timerEndSound.preload = "auto";
   }
-  const PusherAppKey = "32cbd69e4b950bf97679";
-  const PusherCluster = "us2";
+  const RealtimeApiBase = "https://web.kick.com/api/v1/realtime";
+  const realtimeClientId =
+    globalThis.crypto?.randomUUID?.() ||
+    `kick-timer-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
   const timerEl = document.getElementById("timer");
   const timerMessageEl = document.getElementById("timerMessage");
@@ -24,8 +26,16 @@
   let socket = null;
   let reconnectTimer = null;
   let reconnectAttempts = 0;
+  let connecting = false;
+  let currentChannelId = null;
   let currentChatroomId = null;
   let broadcasterUsername = null;
+
+  let realtimeProvider = null;
+  let realtimeConnection = null;
+  let realtimeToken = null;
+  let realtimeCommandId = 0;
+  let realtimeRefreshTimer = null;
 
   let timerInterval = null;
   let timerEndsAt = null;
@@ -230,8 +240,11 @@
 
     const badgeContainers = [
       sender?.badges,
+      sender?.badges_v2,
       sender?.identity?.badges,
-      sender?.channel_identity?.badges
+      sender?.identity?.badges_v2,
+      sender?.channel_identity?.badges,
+      sender?.channel_identity?.badges_v2
     ];
 
     for (const badges of badgeContainers) {
@@ -342,15 +355,227 @@
     }
   }
 
-  function handleSocketMessage(event) {
-    let packet;
+  async function postRealtime(path, body) {
+    const response = await fetch(`${RealtimeApiBase}${path}`, {
+      method: "POST",
+      cache: "no-store",
+      credentials: "omit",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "x-app-platform": "web"
+      },
+      body: JSON.stringify(body)
+    });
 
-    try {
-      packet = JSON.parse(event.data);
-    } catch {
+    if (!response.ok) {
+      throw new Error(`Kick realtime HTTP ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  async function negotiateRealtime(channelId) {
+    const payload = await postRealtime(
+      `/channels/${encodeURIComponent(channelId)}/chat/connection`,
+      {
+        client: {
+          id: realtimeClientId,
+          type: "web"
+        },
+        capabilities: {
+          accepted_providers: [
+            { provider: "centrifugo" },
+            { provider: "pusher" }
+          ]
+        }
+      }
+    );
+
+    const connections = payload?.data?.connections;
+
+    if (!Array.isArray(connections)) {
+      throw new Error("Kick realtime response has no connections");
+    }
+
+    const centrifugo = connections.find(item =>
+      item?.provider === "centrifugo" &&
+      typeof item?.credentials?.url === "string"
+    );
+
+    if (centrifugo) {
+      return {
+        provider: "centrifugo",
+        url: centrifugo.credentials.url
+      };
+    }
+
+    const pusher = connections.find(item =>
+      item?.provider === "pusher" &&
+      typeof item?.credentials?.app_key === "string" &&
+      typeof item?.credentials?.cluster === "string"
+    );
+
+    if (pusher) {
+      const params = new URLSearchParams({
+        protocol: "7",
+        client: "js",
+        version: "8.4.0",
+        flash: "false"
+      });
+
+      return {
+        provider: "pusher",
+        url:
+          `wss://ws-${pusher.credentials.cluster}.pusher.com/app/` +
+          `${pusher.credentials.app_key}?${params}`
+      };
+    }
+
+    throw new Error("Kick supplied no supported realtime connection");
+  }
+
+  async function fetchRealtimeToken() {
+    const payload = await postRealtime("/auth/connection", {
+      client_id: realtimeClientId
+    });
+
+    const token = payload?.data?.token;
+
+    if (typeof token !== "string" || !token) {
+      throw new Error("Kick realtime token missing");
+    }
+
+    return token;
+  }
+
+  function clearRealtimeRefresh() {
+    if (realtimeRefreshTimer) {
+      clearTimeout(realtimeRefreshTimer);
+      realtimeRefreshTimer = null;
+    }
+  }
+
+  function scheduleRealtimeRefresh(ttl) {
+    clearRealtimeRefresh();
+
+    if (!Number.isFinite(ttl) || ttl <= 0) {
       return;
     }
 
+    const delay = Math.max(1000, ttl * 0.8 * 1000);
+
+    realtimeRefreshTimer = setTimeout(async () => {
+      try {
+        realtimeToken = await fetchRealtimeToken();
+        sendCentrifugoCommand("refresh", {
+          token: realtimeToken
+        });
+      } catch (err) {
+        error("Unable to refresh Kick realtime token:", err);
+        socket?.close();
+      }
+    }, delay);
+  }
+
+  function sendCentrifugoCommand(type, data) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    realtimeCommandId += 1;
+
+    socket.send(JSON.stringify({
+      id: realtimeCommandId,
+      [type]: data
+    }));
+  }
+
+  function subscribeChat() {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const channel = `chatrooms.${currentChatroomId}.v2`;
+
+    if (realtimeProvider === "centrifugo") {
+      sendCentrifugoCommand("subscribe", { channel });
+      return;
+    }
+
+    socket.send(JSON.stringify({
+      event: "pusher:subscribe",
+      data: {
+        auth: "",
+        channel
+      }
+    }));
+  }
+
+  function handleCentrifugoPacket(packet) {
+    if (!packet || typeof packet !== "object") {
+      return;
+    }
+
+    if (Object.keys(packet).length === 0) {
+      socket?.send("{}");
+      return;
+    }
+
+    if (packet.error) {
+      error("Kick realtime command error:", packet.error);
+      socket?.close();
+      return;
+    }
+
+    if (packet.connect) {
+      reconnectAttempts = 0;
+      log("Kick realtime connection established (Centrifugo)");
+
+      if (packet.connect.expires) {
+        scheduleRealtimeRefresh(Number(packet.connect.ttl));
+      }
+
+      subscribeChat();
+      return;
+    }
+
+    if (packet.subscribe) {
+      log(`Subscribed to chatrooms.${currentChatroomId}.v2`);
+      return;
+    }
+
+    if (packet.refresh) {
+      if (packet.refresh.expires) {
+        scheduleRealtimeRefresh(Number(packet.refresh.ttl));
+      }
+      return;
+    }
+
+    const publication = packet?.push?.pub?.data;
+
+    if (!publication) {
+      return;
+    }
+
+    const envelope = safeJsonParse(publication);
+
+    if (!envelope || typeof envelope !== "object") {
+      return;
+    }
+
+    const eventName = String(envelope.event || "").toLowerCase();
+
+    if (
+      eventName.includes("chatmessage") ||
+      eventName.includes("chat_message") ||
+      eventName.includes("messagesent")
+    ) {
+      handleChatPayload(safeJsonParse(envelope.data));
+    }
+  }
+
+  function handlePusherPacket(packet) {
     if (packet.event === "pusher:ping") {
       socket?.send(JSON.stringify({
         event: "pusher:pong",
@@ -360,22 +585,20 @@
     }
 
     if (packet.event === "pusher:connection_established") {
-      log("Pusher connection established");
-
-      socket.send(JSON.stringify({
-        event: "pusher:subscribe",
-        data: {
-          auth: "",
-          channel: `chatrooms.${currentChatroomId}.v2`
-        }
-      }));
-
+      reconnectAttempts = 0;
+      log("Kick realtime connection established (Pusher)");
+      subscribeChat();
       return;
     }
 
     if (packet.event === "pusher_internal:subscription_succeeded") {
-      reconnectAttempts = 0;
       log(`Subscribed to chatrooms.${currentChatroomId}.v2`);
+      return;
+    }
+
+    if (packet.event === "pusher:error") {
+      error("Kick Pusher error:", safeJsonParse(packet.data));
+      socket?.close();
       return;
     }
 
@@ -386,20 +609,30 @@
       eventName.includes("chat_message") ||
       eventName.includes("messagesent")
     ) {
-      const payload = safeJsonParse(packet.data);
-      handleChatPayload(payload);
+      handleChatPayload(safeJsonParse(packet.data));
     }
   }
 
-  function buildWsUrl() {
-    const params = new URLSearchParams({
-      protocol: "7",
-      client: "js",
-      version: "8.4.0",
-      flash: "false"
-    });
+  function handleSocketMessage(event) {
+    const chunks = String(event.data || "").split(/\r?\n/);
 
-    return `wss://ws-${PusherCluster}.pusher.com/app/${PusherAppKey}?${params}`;
+    for (const chunk of chunks) {
+      if (!chunk) continue;
+
+      let packet;
+
+      try {
+        packet = JSON.parse(chunk);
+      } catch {
+        continue;
+      }
+
+      if (realtimeProvider === "centrifugo") {
+        handleCentrifugoPacket(packet);
+      } else {
+        handlePusherPacket(packet);
+      }
+    }
   }
 
   function scheduleReconnect() {
@@ -417,9 +650,8 @@
     }, delay);
   }
 
-  function connectWebSocket() {
-    if (!currentChatroomId) {
-      error("Missing chatroom ID");
+  async function connectWebSocket() {
+    if (!currentChannelId || !currentChatroomId || connecting) {
       return;
     }
 
@@ -433,22 +665,62 @@
       return;
     }
 
-    socket = new WebSocket(buildWsUrl());
+    connecting = true;
+    clearRealtimeRefresh();
 
-    socket.addEventListener("open", () => {
-      log("WebSocket opened");
-    });
+    try {
+      realtimeConnection = await negotiateRealtime(currentChannelId);
+      realtimeProvider = realtimeConnection.provider;
+      realtimeCommandId = 0;
 
-    socket.addEventListener("message", handleSocketMessage);
+      if (realtimeProvider === "centrifugo") {
+        realtimeToken = await fetchRealtimeToken();
+      } else {
+        realtimeToken = null;
+      }
 
-    socket.addEventListener("error", event => {
-      error("WebSocket error", event);
-    });
+      log("Kick realtime provider:", realtimeProvider);
 
-    socket.addEventListener("close", () => {
+      socket = new WebSocket(realtimeConnection.url);
+
+      socket.addEventListener("open", () => {
+        connecting = false;
+        log("WebSocket opened");
+
+        if (realtimeProvider === "centrifugo") {
+          sendCentrifugoCommand("connect", {
+            token: realtimeToken,
+            name: "kick-obs-timer",
+            version: "1"
+          });
+        }
+      });
+
+      socket.addEventListener("message", handleSocketMessage);
+
+      socket.addEventListener("error", event => {
+        error("WebSocket error", event);
+      });
+
+      socket.addEventListener("close", event => {
+        connecting = false;
+        clearRealtimeRefresh();
+
+        warn("WebSocket closed", {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean
+        });
+
+        socket = null;
+        scheduleReconnect();
+      });
+    } catch (err) {
+      connecting = false;
       socket = null;
+      error("Kick realtime connection failed:", err);
       scheduleReconnect();
-    });
+    }
   }
 
   async function fetchChannelData(channel) {
@@ -497,6 +769,10 @@
     try {
       const data = await fetchChannelData(channel);
 
+      currentChannelId =
+        data?.id ||
+        data?.channel?.id;
+
       currentChatroomId =
         data?.chatroom?.id ||
         data?.chatroom_id ||
@@ -509,12 +785,13 @@
         channel
       );
 
-      if (!currentChatroomId) {
-        throw new Error("Kick API did not return chatroom.id");
+      if (!currentChannelId || !currentChatroomId) {
+        throw new Error("Kick API did not return channel/chatroom ID");
       }
 
       log("Channel resolved", {
         channel: broadcasterUsername,
+        channelId: currentChannelId,
         chatroomId: currentChatroomId
       });
 
@@ -530,6 +807,7 @@
 
   window.addEventListener("beforeunload", () => {
     clearTimeout(reconnectTimer);
+    clearRealtimeRefresh();
 
     if (timerInterval) {
       clearInterval(timerInterval);
