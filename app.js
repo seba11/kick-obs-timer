@@ -14,7 +14,7 @@
   if (timerEndSound) {
     timerEndSound.preload = "auto";
   }
-  const PusherAppKey = "32cbd69e4b950bf97679";
+  const PusherAppKey = "34bf7a0ff419a2a775b9";
   const PusherCluster = "us2";
 
   const timerEl = document.getElementById("timer");
